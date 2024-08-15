@@ -1,4 +1,5 @@
-type Byte = u8;
+use std::fs::File;
+use std::io::Read;
 
 const RAM_SIZE: usize       = 4096;
 const STACK_SIZE: usize     = 16;
@@ -149,8 +150,23 @@ impl Chip8 {
             _ => println!("Unknown opcode: {:#X}", opcode)
         }
     }
+
+    fn load_rom(&mut self, rom: Vec<u8>) {
+        self.ram[START_ADDR..START_ADDR + rom.len()].copy_from_slice(&rom);
+    }
+}
+
+fn read_rom(file_path: &str) -> Vec<u8> {
+    let mut f = File::open(file_path).expect("File not found");
+    let mut rom = Vec::new();
+    f.read_to_end(&mut rom).expect("Failed to read file");
+    return rom;
 }
 
 fn main() {
-    println!("Hello, world!");
+    const ROM_PATH: &str = "roms/ibm.ch8";
+    let rom = read_rom(ROM_PATH);
+
+    let mut chip8 = Chip8::new();
+    chip8.load_rom(rom);
 }
