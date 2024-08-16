@@ -4,7 +4,6 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
-use sdl2::render::Canvas;
 use std::time::Duration;
 
 use std::fs::File;
@@ -107,7 +106,7 @@ impl Chip8 {
         return opcode;
     }
 
-    // #[allow(unused_parens)]
+    #[allow(unused_parens)]
     fn execute(&mut self, opcode: u16) {
         let d1 = (opcode & 0xF000) >> 12;
         let d2 = (opcode & 0x0F00) >> 8;
@@ -178,7 +177,9 @@ impl Chip8 {
                 self.v_reg[d2 as usize] ^= self.v_reg[d3 as usize];
             },
             (8, _, _, 4) => {
-                self.v_reg[d2 as usize] += self.v_reg[d3 as usize];
+                let (vx, flag) = self.v_reg[d2 as usize].overflowing_add(self.v_reg[d3 as usize]);
+                self.v_reg[d2 as usize] = vx;
+                self.v_reg[0xF as usize] = if flag { 1 } else { 0 };
             }
             (8, _, _, 5) => {
                 let (vx, flag) = self.v_reg[d2 as usize].overflowing_sub(self.v_reg[d3 as usize]);
@@ -348,8 +349,13 @@ fn key_to_button(key: Keycode) -> Option<usize> {
 }
 
 fn main() {
-    const ROM_PATH: &str = "roms/ibm.ch8";
-    let rom = read_rom(ROM_PATH);
+    let args: Vec<_> = std::env::args().collect();
+    if args.len() != 2 {
+        println!("Usage: {} <rom>", args[0]);
+        return;
+    }
+
+    let rom = read_rom(&args[1]);
 
     let mut chip8 = Chip8::new();
     chip8.load_rom(rom);
