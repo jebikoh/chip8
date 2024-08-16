@@ -266,7 +266,7 @@ impl Chip8 {
             (0xF, _, 1, 0xE) => {
                 let (i, flag) = self.i_reg.overflowing_add(self.v_reg[d2 as usize] as u16);
                 self.i_reg = i;
-                self.v_reg[0xF] = if flag { 1 } else { 0 };
+                self.v_reg[0xF] = if flag && i > 0xFFF { 1 } else { 0 };
             },
             (0xF, _, 0, 0xA) => {
                 let mut key_pressed = false;
