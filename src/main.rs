@@ -44,9 +44,6 @@ const SHIFT_QUIRK: bool = false;
 // Controls the behavior of BNNN opcode
 // If set to true, it will function as BXNN 
 const JUMP_QUIRK: bool = false;
-// Controls the behavior of FX55 and FX65 opcodes
-// If set to true, the i register will be incremented
-const STORE_INCREMENT_I_QUIRK: bool = false;
 
 struct Stack {
     stack: [u16; STACK_SIZE],
@@ -328,6 +325,28 @@ fn read_rom(file_path: &str) -> Vec<u8> {
 const CYCLES_PER_FRAME: usize = 12;
 const DISPLAY_SCALE:u32     = 10;
 
+fn key_to_button(key: Keycode) -> Option<usize> {
+    match key {
+        Keycode::Num1 => Some(0x1),
+        Keycode::Num2 => Some(0x2),
+        Keycode::Num3 => Some(0x3),
+        Keycode::Num4 => Some(0xC),
+        Keycode::Q    => Some(0x4),
+        Keycode::W    => Some(0x5),
+        Keycode::E    => Some(0x6),
+        Keycode::R    => Some(0xD),
+        Keycode::A    => Some(0x7),
+        Keycode::S    => Some(0x8),
+        Keycode::D    => Some(0x9),
+        Keycode::F    => Some(0xE),
+        Keycode::Z    => Some(0xA),
+        Keycode::X    => Some(0x0),
+        Keycode::C    => Some(0xB),
+        Keycode::V    => Some(0xF),
+        _ => None
+    }
+}
+
 fn main() {
     const ROM_PATH: &str = "roms/ibm.ch8";
     let rom = read_rom(ROM_PATH);
@@ -355,6 +374,16 @@ fn main() {
                 Event::KeyDown {keycode: Some(Keycode::Escape), ..} => {
                     break 'running
                 },
+                Event::KeyDown {keycode: Some(key), ..} => {
+                    if let Some(button) = key_to_button(key) {
+                        chip8.keypad[button] = true;
+                    }
+                },
+                Event::KeyUp {keycode: Some(key), ..} => {
+                    if let Some(button) = key_to_button(key) {
+                        chip8.keypad[button] = false;
+                    }
+                }
                 _ => {}
             }
         }
