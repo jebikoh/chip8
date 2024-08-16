@@ -10,8 +10,6 @@ use std::time::Duration;
 use std::fs::File;
 use std::io::Read;
 
-use rand::random;
-
 const RAM_SIZE: usize       = 4096;
 const STACK_SIZE: usize     = 16;
 const DISPLAY_WIDTH: usize  = 64;
@@ -46,6 +44,9 @@ const SHIFT_QUIRK: bool = false;
 // Controls the behavior of BNNN opcode
 // If set to true, it will function as BXNN 
 const JUMP_QUIRK: bool = false;
+// Controls the behavior of FX55 and FX65 opcodes
+// If set to true, the i register will be incremented
+const STORE_INCREMENT_I_QUIRK: bool = false;
 
 struct Stack {
     stack: [u16; STACK_SIZE],
@@ -73,6 +74,7 @@ impl Stack {
 
 struct Chip8 {
     display: [bool; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+    keypad: [bool; 16],
     ram: [u8; RAM_SIZE],
     stack: Stack,
     pc: u16,
@@ -86,6 +88,7 @@ impl Chip8 {
     fn new() -> Self {
         let mut new_chip8: Chip8 = Self {
             display: [false; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+            keypad: [false; 16],
             ram: [0; RAM_SIZE],
             stack: Stack::new(),
             pc: START_ADDR as u16,
@@ -245,6 +248,59 @@ impl Chip8 {
                         }
                     }
 
+                }
+            },
+            (0xE, _, 9, 0xE) => {
+                if self.keypad[self.v_reg[d2 as usize] as usize] { self.pc += 2; }
+            },
+            (0xE, _, 0xA, 1) => {
+                if !self.keypad[self.v_reg[d2 as usize] as usize] { self.pc += 2; }
+            },
+            (0xF, _, 0, 7) => {
+                self.v_reg[d2 as usize] = self.d_timer;
+            },
+            (0xF, _, 1, 5) => {
+                self.d_timer = self.v_reg[d2 as usize];
+            },
+            (0xF, _, 1, 8) => {
+                self.s_timer = self.v_reg[d2 as usize];
+            },
+            (0xF, _, 1, 0xE) => {
+                let (i, flag) = self.i_reg.overflowing_add(self.v_reg[d2 as usize] as u16);
+                self.i_reg = i;
+                self.v_reg[0xF] = if flag { 1 } else { 0 };
+            },
+            (0xF, _, 0, 0xA) => {
+                let mut key_pressed = false;
+                for i in 0..16 {
+                    if self.keypad[i] {
+                        self.v_reg[d2 as usize] = i as u8;
+                        key_pressed = true;
+                        break;
+                    }
+                }
+
+                if !key_pressed {
+                    self.pc -= 2;
+                }
+            },
+            (0xF, _, 2, 9) => {
+                self.i_reg = FONT_ADDR as u16 + (self.v_reg[d2 as usize] as u16) * 5;
+            },
+            (0xF, _, 3, 3) => {
+                let num = self.v_reg[d2 as usize];
+                self.ram[self.i_reg as usize] = num % 10;
+                self.ram[self.i_reg as usize + 1] = (num / 10) % 10;
+                self.ram[self.i_reg as usize + 2] = num / 100;
+            },
+            (0xF, _, 5, 5) => {
+                for i in 0..=d2 {
+                    self.ram[(self.i_reg + i as u16) as usize] = self.v_reg[i as usize];
+                }
+            },
+            (0xF, _, 6, 5) => {
+                for i in 0..=d2 {
+                    self.v_reg[i as usize] = self.ram[(self.i_reg + i as u16) as usize];
                 }
             }
             _ => println!("Unknown opcode: {:#X}", opcode)
