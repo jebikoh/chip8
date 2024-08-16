@@ -1,5 +1,16 @@
+extern crate sdl2;
+
+use sdl2::pixels::Color;
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::rect::Rect;
+use sdl2::render::Canvas;
+use std::time::Duration;
+
 use std::fs::File;
 use std::io::Read;
+
+use rand::random;
 
 const RAM_SIZE: usize       = 4096;
 const STACK_SIZE: usize     = 16;
@@ -28,6 +39,13 @@ const FONT_SET: [u8; 80]    = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 ];
+
+// Controls behavior of 8XY6 and 8XYE opcodes
+// If set to true, the value of register Y is copied to register X before the operation
+const SHIFT_QUIRK: bool = false;
+// Controls the behavior of BNNN opcode
+// If set to true, it will function as BXNN 
+const JUMP_QUIRK: bool = false;
 
 struct Stack {
     stack: [u16; STACK_SIZE],
@@ -70,7 +88,7 @@ impl Chip8 {
             display: [false; DISPLAY_WIDTH * DISPLAY_HEIGHT],
             ram: [0; RAM_SIZE],
             stack: Stack::new(),
-            pc: 0,
+            pc: START_ADDR as u16,
             i_reg: 0,
             v_reg: [0; 16],
             d_timer: 0,
@@ -89,7 +107,7 @@ impl Chip8 {
         return opcode;
     }
 
-    #[allow(unused_parens)]
+    // #[allow(unused_parens)]
     fn execute(&mut self, opcode: u16) {
         let d1 = (opcode & 0xF000) >> 12;
         let d2 = (opcode & 0x0F00) >> 8;
@@ -116,25 +134,25 @@ impl Chip8 {
             },
             // 3XNN
             (3, _, _, _) => {
-                if (self.v_reg[d2 as usize] == (opcode & 0xFF) as u8) {
+                if self.v_reg[d2 as usize] == ((opcode & 0xFF) as u8) {
                     self.pc += 2;
                 }
             },
             // 4XNN
             (4, _, _, _) => {
-                if (self.v_reg[d2 as usize] != (opcode & 0xFF) as u8) {
+                if self.v_reg[d2 as usize] != ((opcode & 0xFF) as u8) {
                     self.pc += 2;
                 }
             },
             // 5XY0
             (5, _, _, 0) => {
-                if (self.v_reg[d2 as usize] == self.v_reg[d3 as usize]) {
+                if self.v_reg[d2 as usize] == self.v_reg[d3 as usize] {
                     self.pc += 2;
                 }
             },
             // 9XY0
             (9, _, _, 0) => {
-                if (self.v_reg[d2 as usize] != self.v_reg[d3 as usize]) {
+                if self.v_reg[d2 as usize] != self.v_reg[d3 as usize] {
                     self.pc += 2;
                 }
             },
@@ -145,10 +163,97 @@ impl Chip8 {
             // 7XNN
             (7, _, _, _) => {
                 let reg = d2 as usize;
-                self.v_reg[reg] = self.v_reg[reg] + (opcode & 0xFF) as u8;
+                self.v_reg[reg] = self.v_reg[reg].wrapping_add((opcode & 0xFF) as u8);
+            },
+            (8, _, _, 0) => {
+                self.v_reg[d2 as usize] = self.v_reg[d3 as usize];
+            },
+            (8, _, _, 1) => {
+                self.v_reg[d2 as usize] |= self.v_reg[d3 as usize];
+            },
+            (8, _, _, 2) => {
+                self.v_reg[d2 as usize] &= self.v_reg[d3 as usize];
+            },
+            (8, _, _, 3) => {
+                self.v_reg[d2 as usize] ^= self.v_reg[d3 as usize];
+            },
+            (8, _, _, 4) => {
+                self.v_reg[d2 as usize] += self.v_reg[d3 as usize];
+            }
+            (8, _, _, 5) => {
+                let (vx, flag) = self.v_reg[d2 as usize].overflowing_sub(self.v_reg[d3 as usize]);
+                self.v_reg[d2 as usize] = vx;
+                self.v_reg[0xF as usize] = if flag { 0 } else { 1 };
+            },
+            (8, _, _, 7) => {
+                let (vx, flag) = self.v_reg[d3 as usize].overflowing_sub(self.v_reg[d2 as usize]);
+                self.v_reg[d2 as usize] = vx;
+                self.v_reg[0xF as usize] = if flag { 0 } else { 1 };
+            },
+            (8, _, _, 6) => {
+                let x = d2 as usize;
+                if SHIFT_QUIRK {
+                    self.v_reg[x] = self.v_reg[d3 as usize];
+                }
+                self.v_reg[0xF as usize] = self.v_reg[x] & 0x1;
+                self.v_reg[x] >>= 1;
+            },
+            (8, _, _, 0xE) => {
+                let x = d2 as usize;
+                if SHIFT_QUIRK {
+                    self.v_reg[x] = self.v_reg[d3 as usize];
+                }
+                self.v_reg[0xF as usize] = (self.v_reg[x] >> 7) & 0x1;
+                self.v_reg[x] <<= 1;
+            },
+            (0xA, _, _, _) => {
+                self.i_reg = opcode & 0x0FFF;
+            },
+            (0xB, _, _, _) => {
+                let offset = if JUMP_QUIRK { self.v_reg[d2 as usize] as u16 } else { self.v_reg[0] as u16 };
+                self.pc = offset + (opcode & 0x0FFF);
+            },
+            (0xC, _, _, _) => {
+                let r: u8 = rand::random();
+                self.v_reg[d2 as usize] = r & ((opcode & 0x00FF) as u8);
+            },
+            (0xD, _, _, _) => {
+                // Display!
+                let x = self.v_reg[d2 as usize] % (DISPLAY_WIDTH as u8);
+                let y = self.v_reg[d3 as usize] % (DISPLAY_HEIGHT as u8);
+                self.v_reg[0xF] = 0;
+            
+                for row in 0..d4 {
+                    let sprite = self.ram[(self.i_reg + (row as u16)) as usize];
+                    // Check if row is out of bounds
+                    if y + row as u8 >= DISPLAY_HEIGHT as u8 {
+                        continue;
+                    }
+                    for col in 0..8 {
+                        // Check if column is out of bounds
+                        if x + col as u8 >= DISPLAY_WIDTH as u8 {
+                            continue;
+                        }
+                        // Check if the pixel is set on the sprite
+                        if (sprite & (0x80 >> col)) != 0 {
+                            let idx = (y + row as u8) as usize * DISPLAY_WIDTH + (x + col) as usize;
+                            // Flip the bit if it's off; otherwise set the flag
+                            if self.display[idx] {
+                                self.v_reg[0xF] = 1;
+                            }
+                            self.display[idx] ^= true;
+                        }
+                    }
+
+                }
             }
             _ => println!("Unknown opcode: {:#X}", opcode)
         }
+    }
+
+    fn cycle(&mut self) {
+        let opcode = self.fetch();
+        self.execute(opcode);
     }
 
     fn load_rom(&mut self, rom: Vec<u8>) {
@@ -163,10 +268,59 @@ fn read_rom(file_path: &str) -> Vec<u8> {
     return rom;
 }
 
+
+const CYCLES_PER_FRAME: usize = 12;
+const DISPLAY_SCALE:u32     = 10;
+
 fn main() {
     const ROM_PATH: &str = "roms/ibm.ch8";
     let rom = read_rom(ROM_PATH);
 
     let mut chip8 = Chip8::new();
     chip8.load_rom(rom);
+
+    let sdl_context = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
+    let window = video_subsystem.window("Chip8", 640, 320)
+        .position_centered()
+        .build()
+        .unwrap();
+    let mut canvas = window.into_canvas().build().unwrap();
+
+    canvas.set_draw_color(Color::BLACK);
+    canvas.clear();
+    canvas.present();
+
+    let mut event_pump = sdl_context.event_pump().unwrap();
+    'running: loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit {..} |
+                Event::KeyDown {keycode: Some(Keycode::Escape), ..} => {
+                    break 'running
+                },
+                _ => {}
+            }
+        }
+
+        for _ in 0..CYCLES_PER_FRAME {
+            chip8.cycle();
+        }
+
+        // Draw screen
+        canvas.set_draw_color(Color::BLACK);
+        canvas.clear();
+        canvas.set_draw_color(Color::WHITE);
+        let screen_buf = chip8.display;
+        for (i, pixel) in screen_buf.iter().enumerate() {
+            if *pixel {
+                let x = (i % DISPLAY_WIDTH) as u32;
+                let y = (i / DISPLAY_WIDTH) as u32;
+                canvas.fill_rect(Rect::new((x * DISPLAY_SCALE) as i32, (y * DISPLAY_SCALE) as i32, DISPLAY_SCALE, DISPLAY_SCALE)).unwrap();
+            }
+        }
+        canvas.present();
+
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+    }
 }
