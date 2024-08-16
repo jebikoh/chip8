@@ -228,12 +228,12 @@ impl Chip8 {
                     let sprite = self.ram[(self.i_reg + (row as u16)) as usize];
                     // Check if row is out of bounds
                     if y + row as u8 >= DISPLAY_HEIGHT as u8 {
-                        continue;
+                        break;
                     }
                     for col in 0..8 {
                         // Check if column is out of bounds
                         if x + col as u8 >= DISPLAY_WIDTH as u8 {
-                            continue;
+                            break;
                         }
                         // Check if the pixel is set on the sprite
                         if (sprite & (0x80 >> col)) != 0 {
@@ -308,6 +308,15 @@ impl Chip8 {
     fn cycle(&mut self) {
         let opcode = self.fetch();
         self.execute(opcode);
+    }
+
+    fn timer_tick(&mut self) {
+        if self.d_timer > 0 {
+            self.d_timer -= 1;
+        }
+        if self.s_timer > 0 {
+            self.s_timer -= 1;
+        }
     }
 
     fn load_rom(&mut self, rom: Vec<u8>) {
@@ -397,7 +406,8 @@ fn main() {
         for _ in 0..CYCLES_PER_FRAME {
             chip8.cycle();
         }
-
+        chip8.timer_tick();
+        
         // Draw screen
         canvas.set_draw_color(Color::BLACK);
         canvas.clear();
